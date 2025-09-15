@@ -1,0 +1,156 @@
+---
+title: "Analyze Sales"
+subtitle: "CS5200 Practicum 1"
+author: "Sai Karthikeyan, Sura"
+date: "Spring 2025"
+output:
+  pdf_document:
+    keep_tex: true
+  html_document:
+    df_print: paged
+always_allow_html: true
+---
+
+```{r installAndLoadPackagesOnDemand, echo=FALSE, warning=FALSE, eval=TRUE}
+# Function to install packages on demand
+installPackagesOnDemand <- function(packages) {
+  installed_packages <- packages %in% rownames(installed.packages())
+  if (any(installed_packages == FALSE)) {
+    install.packages(packages[!installed_packages])
+  }
+}
+
+# Function to load required packages
+loadRequiredPackages <- function(packages) {
+  # load required packages
+  for (package in packages) {
+    suppressMessages({
+      library(package, character.only = TRUE)
+    })
+  }
+}
+
+packages <- c("RMySQL", "DBI", "testthat", "kableExtra", "tinytex")
+  
+installPackagesOnDemand(packages)
+loadRequiredPackages(packages)
+```
+
+```{r connectToDatabase, echo=FALSE, warning=FALSE, eval=TRUE}
+# Function to connect and check the connection to the database
+connectToDatabase <- function() {
+  # Aiven only allows for 16 active connections. So to preserve them, disconnect any active connections prior to connecting
+  all_cons <- dbListConnections(RMySQL::MySQL())
+  for (con in all_cons) {
+    dbDisconnect(con)
+  }
+  
+  dbName <- "DB_Name"
+  dbUser <- "DB_USER"
+  dbPassword <- "DB_PASSWORD"
+  dbHost <- "DB_Host"
+  dbPort <- "DB_PORT"
+  
+  tryCatch({
+    con <- dbConnect(
+      RMySQL::MySQL(),
+      user = dbUser,
+      password = dbPassword,
+      dbname = dbName,
+      host = dbHost,
+      port = dbPort
+    )
+    return(con)
+  }, 
+    error = function(e) {
+      stop(e$message)
+    }
+  )
+}
+
+con <- connectToDatabase()
+```
+
+## **Analysis by Restaurant**
+The table below summarizes key metrics for each restaurant, including total visits, unique customers, loyalty program members, and total spending on food and alcohol (excluding tips).
+```{r restaurantAnalysis, echo=FALSE, warning=FALSE, eval=TRUE}
+# SQL query to analyze by restaurent
+query_restaurant <- "
+SELECT 
+    r.RestaurantName AS `Restaurant`,
+    COUNT(v.VisitId) AS `Total Visits`,
+    COUNT(DISTINCT v.CustomerID) AS `Unique Customers`,
+    COUNT(DISTINCT CASE WHEN c.LoyaltyMember = TRUE THEN c.CustomerID END) AS `Loyalty Customers`,
+    SUM(b.FoodBill + COALESCE(b.AlcoholBill, 0)) AS `Total Revenue (Food + Alcohol)`
+FROM Visit v
+JOIN Restaurant r ON v.RestaurantID = r.RestaurantID
+JOIN Customer c ON v.CustomerID = c.CustomerID
+JOIN Bill b ON v.VisitID = b.VisitID
+GROUP BY r.RestaurantName
+ORDER BY `Total Revenue (Food + Alcohol)` DESC;
+"
+
+# Execute query
+result <- dbGetQuery(con, query_restaurant)
+
+# Format and display the table using kableExtra
+kable(result, format = "latex", booktabs = TRUE, caption = "Restaurant Revenue Analysis", align = "c") %>%
+    kable_styling(latex_options = c("striped", "hold_position")) %>%
+    column_spec(1, width = "4cm", bold = TRUE) %>%
+    column_spec(2:4, width = "2cm") %>%
+    column_spec(5, width = "3cm") 
+```
+
+## **Analysis by Year**
+This table displays total revenue (food and alcohol, excluding tips), average per-party spending, and average party size by year across all restaurants.
+```{r yearAnalytics, echo=FALSE, warning=FALSE, eval=TRUE}
+# SQL query to analyze revenue by year
+query_year <- "
+SELECT 
+    YEAR(v.VisitDate) AS `Year`,
+    SUM(b.FoodBill + COALESCE(b.AlcoholBill, 0)) AS `Total Revenue (Food + Alcohol)`,
+    ROUND(SUM(b.FoodBill + COALESCE(b.AlcoholBill, 0)) / COUNT(v.VisitID), 2) AS `Avg Per Party Spent`,
+    ROUND(AVG(v.PartySize), 2) AS `Avg Party Size`
+FROM Visit v
+JOIN Bill b ON v.VisitId = b.VisitID
+GROUP BY `Year`
+ORDER BY `Year` ASC;
+"
+
+# Execute query
+result_year <- dbGetQuery(con, query_year)
+
+# Format dynamically with years as columns
+kable(result_year, format = "latex", booktabs = TRUE, caption = "Annual Revenue Analysis", align = "c") %>%
+    kable_styling(latex_options = c("striped", "hold_position")) %>%
+    column_spec(1, width = "3cm", bold = TRUE) %>%
+    column_spec(2, width = "3cm") %>%
+    column_spec(3, width = "3cm")
+```
+
+## **Trend by Year**
+The line chart below illustrates the trend in total revenue (food and alcohol, excluding tips) over the years.
+```{r yearTrend, echo=FALSE, warning=FALSE, eval=TRUE, fig.width=12, fig.height=8}
+# Extract year and revenue data for plotting
+years <- result_year$Year
+revenue <- result_year$`Total Revenue (Food + Alcohol)`
+
+# Create the line chart
+plot(years, revenue, type = "o", col = "blue", lwd = 2, pch = 16,
+     xlab = "Year", ylab = "Total Revenue (Food + Alcohol)",
+     main = "Trend of Total Revenue by Year")
+
+# Add grid lines
+grid()
+
+# Add data labels
+text(years, revenue, labels = round(revenue, 2), pos = 3, cex = 0.9, col = "red")
+
+# Add a legend
+legend("topleft", legend = "Total Revenue", col = "blue", lty = 1, lwd = 2, pch = 16)
+
+```
+
+```{r closeConnection, echo=FALSE, warning=FALSE, eval=TRUE}
+invisible(dbDisconnect(con))
+```
