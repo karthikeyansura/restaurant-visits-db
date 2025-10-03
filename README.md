@@ -1,4 +1,4 @@
-# Restaurant Visits Database Design & Analytics
+# Visitor Analytics & Management System
 
 This project was developed as part of **CS5200 – Practicum I** at Northeastern University.  
 It demonstrates the **end-to-end pipeline** of designing, implementing, and analyzing a normalized relational database from a raw CSV dataset of restaurant visits.
